@@ -1,19 +1,10 @@
-# ================================
-# IMPORT REQUIRED LIBRARIES
-# ================================
-
+import datetime
 import os                          # For file and directory handling
 import numpy as np                # Numerical operations
 import matplotlib.pyplot as plt   # Plotting
-from joblib import PrintTime
 from scipy.signal import butter, filtfilt  # Signal filtering
 import wfdb                       # Reading .dat + .hea ECG files
 from biosppy.signals import ecg   # QRS detection (R-peak detection)
-
-
-# ================================
-# SIGNAL PREPROCESSING FUNCTION
-# ================================
 
 def preprocess_signal(signal, sampling_rate):
     """
@@ -21,62 +12,46 @@ def preprocess_signal(signal, sampling_rate):
 
     Parameters:
         signal (np.array): ECG signal (shape: channels x samples)
-        sampling_rate (int): Original sampling rate (e.g., 500 Hz)
-
+        sampling_rate (int): Original sampling rate (100Hz)
     Returns:
         downsampled_signal (np.array): Processed signal
         new_sampling_rate (int): Updated sampling rate after downsampling
     """
 
-    # ---- Step 1: Low-pass filter ----
-    # We remove high-frequency noise (e.g., muscle artifacts)
-    # Cutoff = 40 Hz (typical for ECG)
-    # Normalize cutoff by Nyquist frequency (fs / 2)
-
+    # removing noise w a filter
+    #dont include nulls
     if signal is None or signal.size == 0:
         raise ValueError("Empty signal")
-
     if np.isnan(signal).any():
         raise ValueError("Signal contains NaNs")
 
+    # Normalize cutoff by Nyquist frequency (fs / 2)
+    nyquist = sampling_rate / 2
 
+    low_cutoff = max(0.5, sampling_rate / 100)  # At least 0.5 Hz or higher
+    high_cutoff = min(30, nyquist * 0.95)  # Max 30 Hz or just below Nyquist
 
-    low = 0.5 / (sampling_rate / 2)
-    high = 40 / (sampling_rate / 2)
-    print("sampling rate: ", sampling_rate)
-    print("high", high)
-    print("low", low)
+    print(f"Using cutoffs: {low_cutoff} - {high_cutoff} Hz")
 
-    # Safety clamp
-    high = min(high, 0.99)
-
-    if not (0 < low < high < 1):
-        raise ValueError(f"Invalid normalized frequencies: low={low}, high={high}")
-
-
-    # Design a 4th-order Butterworth low-pass filter
-    b, a = butter(4, [0.5, 30], btype='band', fs=sampling_rate)
-
-    # Apply filter forward and backward (zero phase distortion)
-    print("Signal shape before filtering:", signal.shape)
+    b, a = butter(4, [low_cutoff, high_cutoff], btype='band', fs=sampling_rate)
     filtered_signal = filtfilt(b, a, signal, axis=-1)
+    print("Filter successful ", b, a)
+    print("Filtered signal: ", filtered_signal)
+    #works
+    return filtered_signal
 
-    # ---- Step 2: Downsampling ----
-    # Reduce data size and computational load
-    # Keep every 10th sample
+def downsampling(filtered_signal, sampling_rate):
     downsample_factor = 2
     downsampled_signal = filtered_signal[:, ::downsample_factor]
-
-    # Update sampling rate accordingly
+    print("Downsampling success: ", downsampled_signal)
+    # works
     new_sampling_rate = sampling_rate / downsample_factor
+    # problem
+    print("New sampling rate: ", new_sampling_rate)
 
     return downsampled_signal, new_sampling_rate
 
-
-# ================================
-# ECG PLOTTING FUNCTION
-# ================================
-
+#plotting
 def plot_ecg(signal, sampling_rate, title="ECG Signal"):
     """
     Plots a single ECG lead.
@@ -99,10 +74,7 @@ def plot_ecg(signal, sampling_rate, title="ECG Signal"):
     plt.grid(True)
     plt.show()
 
-
-# ================================
-# QRS DETECTION FUNCTION
-# ================================
+#R peak detection
 
 def detect_qrs_complex(signal, sampling_rate):
     """
@@ -118,15 +90,21 @@ def detect_qrs_complex(signal, sampling_rate):
 
     # biosppy ECG processing returns a dictionary
     # 'rpeaks' contains indices of detected QRS complexes
-    output = ecg.ecg(signal=signal, sampling_rate=sampling_rate, show=False)
-    qrs_indices = output['rpeaks']
+    print("im in qrs")
 
+    #PROBLEM OCCURS HERE
+    output = ecg.ecg(
+        signal=signal,
+        sampling_rate=sampling_rate,
+        show=False
+    )
+    print("output of ecg.ecg: ", output)
+    qrs_indices = output['rpeaks']
+    print("qrs indices: ", qrs_indices)
     return qrs_indices
 
 
-# ================================
-# RR INTERVAL CALCULATION
-# ================================
+#rr intervals
 
 def calculate_rr_intervals(qrs_indices, sampling_rate):
     """
@@ -145,11 +123,7 @@ def calculate_rr_intervals(qrs_indices, sampling_rate):
 
     return rr_intervals
 
-
-# ================================
-# LOAD WFDB (.dat) ECG FILE
-# ================================
-
+#load data
 def load_dat_ecg(file_path):
     """
     Loads ECG signal from WFDB .dat file.
@@ -178,12 +152,29 @@ def load_dat_ecg(file_path):
     # Sampling frequency
     sampling_rate = record.fs
 
+    print(f"Sampling rate: {sampling_rate} Hz")
+    print(f"Signal shape: {signal.shape}")
+    print(f"Data type: {signal.dtype}")
+    print(f"Contains NaN: {np.isnan(signal).any()}")
+    print(f"Contains Inf: {np.isinf(signal).any()}")
+    print(f"Min value: {np.min(signal):.6f}")
+    print(f"Max value: {np.max(signal):.6f}")
+    print(f"Mean value: {np.mean(signal):.6f}")
+    print(f"Std deviation: {np.std(signal):.6f}")
+
+    # Check for unusual values
+    if np.max(np.abs(signal)) > 1e6:
+        print("WARNING: Extremely large values detected!")
+
+    if np.std(signal) == 0:
+        print("WARNING: Zero standard deviation - signal is constant!")
+
+    # Check first few samples
+    print(f"First 10 samples: {signal[0, :10]}")
+
     return signal, sampling_rate
 
-
-# ================================
 # MAIN PROCESSING LOOP
-# ================================
 
 def process_all_ecg_files(root_dir):
     """
@@ -192,6 +183,7 @@ def process_all_ecg_files(root_dir):
     Parameters:
         root_dir (str): Root directory containing ECG records
     """
+    start_time = datetime.datetime.now()
 
     # Walk through directory tree
     for root, dirs, files in os.walk(root_dir):
@@ -210,31 +202,44 @@ def process_all_ecg_files(root_dir):
                     print(f"Sampling rate (fs): {fs}")
 
                     # ---- Step 2: Preprocess ----
-                    processed_signal, new_fs = preprocess_signal(signal, fs)
+                    processed_signal = preprocess_signal(signal, fs)
 
-                    # ---- Step 3: Select one lead ----
-                    # Use first channel (lead I typically)
+
+                    print("Processed signal and new fs done: ", processed_signal)
+                    #select one channel from filtered signal
                     lead_signal = processed_signal[0]
+                    print("lead signal: ", lead_signal)
 
-                    # ---- Step 4: Plot ----
-                    segment = lead_signal[:5000]  # first 50 seconds
+                    #PROBLEM OCCURED SOMEWHERE HERE while downsampling ran right after filtering
+                    # decided to downsample AFTER RR peak detection
+                    # Detect QRS
+                    qrs_indices = detect_qrs_complex(lead_signal, fs)
+                    print("qrs done")
+                    # Compute RR intervals
+                    rr_intervals = calculate_rr_intervals(qrs_indices, fs)
+                    print("rr_intervals done")
+
+                    #downsample after qrs and select the same channel as lead
+                    downsampled_signal, new_fs = downsampling(processed_signal, fs)
+                    lead_signal_downsampled = downsampled_signal[0]
+                    print("lead signal: ", lead_signal_downsampled)
+
+                    # Plot
+                    segment = lead_signal_downsampled[:5000]  # first 50 seconds
                     plot_ecg(segment, new_fs, title=file)
 
-                    # ---- Step 5: Detect QRS ----
-                    qrs_indices = detect_qrs_complex(lead_signal, new_fs)
-
-                    # ---- Step 6: Compute RR intervals ----
-                    rr_intervals = calculate_rr_intervals(qrs_indices, new_fs)
-
-                    # ---- Step 7: Print insights ----
                     print(f"Number of QRS complexes: {len(qrs_indices)}")
                     print(f"Average RR interval: {np.mean(rr_intervals):.3f} s")
                     print(f"Minimum RR interval: {np.min(rr_intervals):.3f} s")
                     print(f"Maximum RR interval: {np.max(rr_intervals):.3f} s")
                     print("--------------------------------------------------")
 
+
                 except Exception as e:
                     print(f"Error processing file {file}: {e}")
+
+        stopwatch = start_time - datetime.datetime.now()
+        print("TOTAL EXECUTION TIME: ",stopwatch)
 
 
 # ================================
@@ -242,7 +247,7 @@ def process_all_ecg_files(root_dir):
 # ================================
 
 # Root directory containing WFDB records
-data_root_dir = "C:/Users/julia/Documents/GitHub/sleep_apnea_detection/apnea-ecg-database-1.0.0"
+data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
 
 # Run processing
 process_all_ecg_files(data_root_dir)
