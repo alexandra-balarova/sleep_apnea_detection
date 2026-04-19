@@ -63,36 +63,33 @@ def detect_qrs_complex(signal, sampling_rate):
         show = False
     )
 
-    return output['rpeaks'], output['heart_rate'], output['heart_rate_ts']
-
+    return output['rpeaks']
 #rr intervals
 
 def calculate_rr_intervals(qrs_indices, sampling_rate):
-    """
-        rr_intervals (np.array): RR intervals in seconds
-    """
     # Difference between consecutive R-peaks
     rr_intervals = np.diff(qrs_indices) / sampling_rate
 
     return rr_intervals
 
 def get_features(rr_intervals):
-    rr_mean = np.mean(rr_intervals)
-    rr_sd = np.std(rr_intervals)
-    differences = []
-    for i in range(len(rr_intervals)-1):
-        current = rr_intervals[i]
-        next = rr_intervals[i+1]
-        differences.append((next - current)**2)
-    summed = sum(differences)
-    rmssd = sqrt((1 / (len(rr_intervals) - 1)) * summed)
-    nn50 = 0
-    for rr in rr_intervals:
-        if rr > 0.50:
-            nn50+=1
-    pnn50 = nn50/len(rr_intervals)
+    if len(rr_intervals) > 2:
+        rr_mean = np.mean(rr_intervals)
+        rr_sd = np.std(rr_intervals)
+        differences = []
+        for i in range(len(rr_intervals)-1):
+            current = rr_intervals[i]
+            next = rr_intervals[i+1]
+            differences.append((next - current)**2)
+        summed = sum(differences)
+        rmssd = sqrt((1 / (len(rr_intervals) - 1)) * summed)
+        diffs = np.abs(np.diff(rr_intervals))
+        nn50 = np.sum(diffs > 0.05)
+        pnn50 = nn50 / len(diffs) if len(diffs) > 0 else 0
+        return rr_mean, rr_sd, rmssd, nn50, pnn50, 60/rr_mean
 
-    return rr_mean, rr_sd, rmssd, nn50, pnn50
+    else:
+        return None, None, None, None, None, None
 
 #load data
 def load_dat_ecg(file_path):
@@ -109,30 +106,31 @@ def load_dat_ecg(file_path):
     # Sampling frequency
     sampling_rate = record.fs
 
-    # Check for unusual values
-    if np.max(np.abs(signal)) > 1e6:
-        print("WARNING: Extremely large values detected!")
-
-    if np.std(signal) == 0:
-        print("WARNING: Zero standard deviation - signal is constant!")
-
     # Check first few samples
     return signal, sampling_rate
 
 def process_segment(signal, fs):
+    try:
+        qrs_indices = detect_qrs_complex(signal, fs)
 
-    qrs_indices, heart_rate, heart_rate_ts = detect_qrs_complex(signal, fs)
+        if len(qrs_indices) < 2:
+            return None, None, None, None, None, None
 
-    rr_intervals = calculate_rr_intervals(qrs_indices, fs)
+        rr_intervals = calculate_rr_intervals(qrs_indices, fs)
 
-    rr_mean, rr_sd, rmssd, nn50, pnn50 = get_features(rr_intervals)
+        return get_features(rr_intervals)
 
-    return rr_mean, rr_sd, rmssd, nn50, pnn50
+    except:
+        return None, None, None, None, None, None
 
 # MAIN PROCESSING LOOP
 def process_file(file_path):
     try:
         print(f"\nProcessing file: {os.path.basename(file_path)}")
+        annotation = wfdb.rdann(file_path.replace(".dat", ""), 'apn')
+        labels = annotation.symbol
+        labels_numeric = [1 if l == 'A' else 0 for l in labels]
+
         signal, fs = load_dat_ecg(file_path)
         processed_signal = preprocess_signal(signal, fs)
 
@@ -151,19 +149,25 @@ def process_file(file_path):
             end = start + samples_per_min
             segment = lead_signal[start:end]
 
-            rr_mean, rr_sd, rmssd, nn50, pnn50 = process_segment(segment,fs)
+            rr_mean, rr_sd, rmssd, nn50, pnn50, bpm = process_segment(segment,fs)
             records.append({ "title": f"{os.path.basename(file_path)}_{i}",
                             "rr_mean": rr_mean,
                             "rr_sd":rr_sd,
                             "rmssd": rmssd,
                             "nn50": nn50,
-                            "pnn50": pnn50})
+                            "pnn50": pnn50,
+                             "bpm": bpm,
+                             "label": "N/A"})
+        min_len = min(len(records), len(labels_numeric))
+        for i in range(min_len):
+            records[i]["label"] = labels_numeric[i]
 
         return records
 
 
     except Exception as e:
         print(f"Error processing file {os.path.basename(file_path)}: {e}")
+        return []
 
 def process_all_ecg_files(root_dir):
     start_time = time.time()
@@ -172,7 +176,7 @@ def process_all_ecg_files(root_dir):
     i =0
     for root, _, files in os.walk(root_dir):
         for file in files:
-            if file.endswith(".dat") and not file.endswith("r.dat") and i < 10:
+            if file.endswith(".dat") and not file.endswith("r.dat") and i < 35:
                 i += 1
                 file_paths.append(os.path.join(root, file))
 
@@ -194,4 +198,3 @@ if __name__ == '__main__':
 
     # Run processing
     process_all_ecg_files(data_root_dir)
-
