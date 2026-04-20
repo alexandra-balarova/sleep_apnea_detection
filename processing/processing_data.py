@@ -138,7 +138,7 @@ def process_file(file_path):
         lead_signal = processed_signal[0]
 
         #get a sample every minute
-        samples_per_min = int(fs * 59.99)  # one minute
+        samples_per_min = int(fs * 60)  # one minute
         length_of_signal = len(lead_signal)
         num_segments = length_of_signal // samples_per_min
 
@@ -158,7 +158,7 @@ def process_file(file_path):
                             "pnn50": pnn50,
                              "bpm": bpm,
                              "label": None,
-                           "patient":os.path.basename(file_path)[:3]})
+                             "patient":os.path.basename(file_path)[:3]})
         min_len = min(len(records), len(labels_numeric))
         for i in range(min_len):
             records[i]["label"] = labels_numeric[i]
