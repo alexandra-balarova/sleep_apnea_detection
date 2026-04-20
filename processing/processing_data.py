@@ -126,7 +126,7 @@ def process_segment(signal, fs):
 # MAIN PROCESSING LOOP
 def process_file(file_path):
     try:
-        print(f"\nProcessing file: {os.path.basename(file_path)}")
+        print(f"\nProcessing file: {os.path.basename(file_path)[:3]}")
         annotation = wfdb.rdann(file_path.replace(".dat", ""), 'apn')
         labels = annotation.symbol
         labels_numeric = [1 if l == 'A' else 0 for l in labels]
@@ -157,7 +157,8 @@ def process_file(file_path):
                             "nn50": nn50,
                             "pnn50": pnn50,
                              "bpm": bpm,
-                             "label": "N/A"})
+                             "label": None,
+                           "patient":os.path.basename(file_path)[:3]})
         min_len = min(len(records), len(labels_numeric))
         for i in range(min_len):
             records[i]["label"] = labels_numeric[i]
