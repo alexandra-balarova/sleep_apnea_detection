@@ -3,7 +3,9 @@ import os                          # For file and directory handling
 import time
 import numpy as np                # Numerical operations
 from numpy.ma.core import sqrt
-from scipy.signal import butter, filtfilt  # Signal filtering
+from scipy.signal import butter, filtfilt, welch  # Signal filtering, welch for frequency analysis
+from scipy.interpolate import interp1d #for sampling of RR intervals
+from scipy.integrate import trapezoid #for vlf,lf, hf
 import wfdb                       # Reading .dat + .hea ECG files
 from biosppy.signals import ecg   # QRS detection (R-peak detection)
 import pandas
@@ -72,6 +74,70 @@ def calculate_rr_intervals(qrs_indices, sampling_rate):
 
     return rr_intervals
 
+def get_frequency_features(rr_intervals):
+
+    # Too few RR values
+    if len(rr_intervals) < 4:
+        return None, None, None, None, None, None
+
+    # 1. Creating the timeline for RR intervals
+
+    rr_times = np.cumsum(rr_intervals)
+
+    #  Starts at 0 seconds
+    rr_times = rr_times - rr_times[0]
+
+    # 2. Prepare for interpolation
+
+    interpolation_function = interp1d(
+        rr_times,
+        rr_intervals,
+        kind='cubic',
+        fill_value="extrapolate"
+    )
+
+    # 3. Generate a uniform time axis
+    #    (4 Hz  as in the article)
+
+
+    fs_resample = 4
+
+    resampled_times = np.arange(0,rr_times[-1], 1 / fs_resample )
+
+    # 4. Interpolate the RR signal
+
+    interpolated_rr = interpolation_function(resampled_times)
+
+    # 5. Welch Power Spectral Density
+
+    freqs, psd = welch(interpolated_rr,fs=fs_resample, nperseg=min(256, len(interpolated_rr)))
+
+    # 6. Define frequency ranges
+
+    vlf_band = (freqs >= 0.00) & (freqs < 0.04)
+    lf_band  = (freqs >= 0.04) & (freqs < 0.15)
+    hf_band  = (freqs >= 0.15) & (freqs < 0.40)
+
+
+    # 7. Calculate Power
+
+    vlf = trapezoid(psd[vlf_band], freqs[vlf_band])
+    lf  = trapezoid(psd[lf_band], freqs[lf_band])
+    hf  = trapezoid(psd[hf_band], freqs[hf_band])
+
+    # 8. LF/HF Ratio
+
+    lf_hf = lf / hf if hf > 0 else 0
+
+    # 9. normalised values
+
+    total_power = lf + hf
+
+    lf_norm = (lf / total_power) * 100 if total_power > 0 else 0
+    hf_norm = (hf / total_power) * 100 if total_power > 0 else 0
+
+    return vlf, lf, hf, lf_hf, lf_norm, hf_norm
+
 def get_features(rr_intervals):
     if len(rr_intervals) > 2:
         rr_mean = np.mean(rr_intervals)
@@ -118,7 +184,11 @@ def process_segment(signal, fs):
 
         rr_intervals = calculate_rr_intervals(qrs_indices, fs)
 
-        return get_features(rr_intervals)
+        time_features = get_features(rr_intervals)
+
+        freq_features = get_frequency_features(rr_intervals)
+
+        return (*time_features, *freq_features)
 
     except:
         return None, None, None, None, None, None
@@ -149,7 +219,8 @@ def process_file(file_path):
             end = start + samples_per_min
             segment = lead_signal[start:end]
 
-            rr_mean, rr_sd, rmssd, nn50, pnn50, bpm = process_segment(segment,fs)
+            rr_mean, rr_sd, rmssd, nn50, pnn50, bpm, \
+                vlf, lf, hf, lf_hf, lf_norm, hf_norm = process_segment(segment, fs)
             records.append({ "title": f"{os.path.basename(file_path)}_{i}",
                             "rr_mean": rr_mean,
                             "rr_sd":rr_sd,
@@ -157,6 +228,12 @@ def process_file(file_path):
                             "nn50": nn50,
                             "pnn50": pnn50,
                              "bpm": bpm,
+                             "vlf": vlf,
+                             "lf": lf,
+                             "hf": hf,
+                             "lf_hf": lf_hf,
+                             "lf_norm": lf_norm,
+                             "hf_norm": hf_norm,
                              "label": None,
                              "patient":os.path.basename(file_path)[:3]})
         min_len = min(len(records), len(labels_numeric))
@@ -195,7 +272,8 @@ if __name__ == '__main__':
     freeze_support()  # optional but recommended on Windows
 
     # Root directory containing WFDB records
-    data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
+    #data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
+    data_root_dir = "C:/Users/julia/Documents/GitHub/sleep_apnea_detection/apnea-ecg-database-1.0.0/TESTING"
 
     # Run processing
     process_all_ecg_files(data_root_dir)
