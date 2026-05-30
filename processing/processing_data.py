@@ -251,12 +251,11 @@ def process_all_ecg_files(root_dir):
     start_time = time.time()
     # Walk through directory tree
     file_paths = []
-    i =0
     for root, _, files in os.walk(root_dir):
         for file in files:
-            if file.endswith(".dat") and not file.endswith("r.dat") and i < 35:
-                i += 1
-                file_paths.append(os.path.join(root, file))
+            if file.endswith(".dat") and not file.endswith("r.dat"):
+                    file_paths.append(os.path.join(root, file))
+
 
     with Pool(cpu_count()) as p:
         recordings = p.map(process_file, file_paths)
@@ -272,8 +271,8 @@ if __name__ == '__main__':
     freeze_support()  # optional but recommended on Windows
 
     # Root directory containing WFDB records
-    #data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
-    data_root_dir = "C:/Users/julia/Documents/GitHub/sleep_apnea_detection/apnea-ecg-database-1.0.0/TESTING"
+    data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
+    #data_root_dir = "C:/Users/julia/Documents/GitHub/sleep_apnea_detection/apnea-ecg-database-1.0.0/TESTING"
 
     # Run processing
     process_all_ecg_files(data_root_dir)
