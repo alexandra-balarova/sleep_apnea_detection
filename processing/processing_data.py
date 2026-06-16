@@ -257,7 +257,14 @@ if __name__ == '__main__':
     from multiprocessing import freeze_support
     freeze_support()  # optional but recommended on Windows
 
-    data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
+    #data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
 
+    from pathlib import Path
+
+    # Go from processing/ -> project root
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+    # Dataset folder
+    data_root_dir = PROJECT_ROOT / "apnea-ecg-database-1.0.0"
     # Run processing
     process_all_ecg_files(data_root_dir)
