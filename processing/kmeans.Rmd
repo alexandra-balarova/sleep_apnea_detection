@@ -8,19 +8,29 @@ date: "2026-05-31"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+installing all the libraries
+```{r}
+# Create our function "using()" 
+# If a package is not installed, install it. Then load the package
+using <- function(pkg) {
+  if (!rlang::is_installed(pkg)) 
+    install.packages(pkg, repo = "https://cloud.r-project.org") 
+  library(pkg, character.only = TRUE)  
+}
+```
 # Libraries
 
 ```{r}
-library(plotly)
-library(cluster)
-library(factoextra)
-library(corrplot)
-library(ggplot2)
-library(GGally)
-library(imager)
-library(animation)
-library(data.table)
-library(caret)
+using("plotly")
+using("cluster")
+using("factoextra")
+using("corrplot")
+using("ggplot2")
+using("GGally")
+using("imager")
+using("animation")
+using("data.table")
+using("caret")
 ```
 
 # Load Data

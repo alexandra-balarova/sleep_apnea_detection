@@ -5,16 +5,27 @@ date: "2026-05-30"
 ---
 
 
+installing all the libraries
+```{r}
+# Create our function "using()" 
+# If a package is not installed, install it. Then load the package
+using <- function(pkg) {
+  if (!rlang::is_installed(pkg)) 
+    install.packages(pkg, repo = "https://cloud.r-project.org") 
+  library(pkg, character.only = TRUE)  
+}
+```
+
 # loading the libraries
 ```{r , include=FALSE}
-library(data.table) # Data wrangling (Py_equivalent: pandas, polars, pydatatable)
-library(plotly) # Beautiful plots
-library(rpart) # Decision trees
-library(rpart.plot)
-library(caret)
-library(class)
-library(kknn)
-library(pROC)
+using("data.table") # Data wrangling (Py_equivalent: pandas, polars, pydatatable)
+using("plotly") # Beautiful plots
+using("rpart") # Decision trees
+using("rpart.plot")
+using("caret")
+using("class")
+using("kknn")
+using("pROC")
 ```
 # Reading in the file
 
