@@ -1,3 +1,16 @@
+packages <- c(
+  "data.table",
+  "plotly",
+  "caret",
+  "ranger",
+  "corrplot",
+  "pROC",
+  "xgboost"
+)
+
+install.packages(packages)
+
+
 library(data.table)
 library(plotly)
 library(caret)
@@ -230,13 +243,12 @@ pred_labels <- factor(ifelse(mypred >= 0.35, "1", "0"),levels = c("0", "1")) #be
 confusionMatrix(as.factor(pred_labels),as.factor(test_y), mode="prec_recall", positive = "1")
 
 
-  
 #per patient in tests
 test_results <- copy(test)
 test_results$pred <- pred_labels
 
 patient_perf <- test_results[, .(
-  Sensitivity = mean(pred == label)
+  Accuracy = mean(pred == label)
 ), by = patient]
 
 print(patient_perf)

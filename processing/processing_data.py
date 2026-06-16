@@ -1,13 +1,13 @@
 import datetime
-import os                          # For file and directory handling
+import os
 import time
-import numpy as np                # Numerical operations
+import numpy as np
 from numpy.ma.core import sqrt
-from scipy.signal import butter, filtfilt, welch  # Signal filtering, welch for frequency analysis
+from scipy.signal import butter, filtfilt, welch
 from scipy.interpolate import interp1d #for sampling of RR intervals
 from scipy.integrate import trapezoid #for vlf,lf, hf
-import wfdb                       # Reading .dat + .hea ECG files
-from biosppy.signals import ecg   # QRS detection (R-peak detection)
+import wfdb
+from biosppy.signals import ecg   #QRS detection (R-peak detection)
 import pandas
 from multiprocessing import Pool, cpu_count
 
@@ -42,19 +42,6 @@ def preprocess_signal(signal, sampling_rate):
     filtered_signal = filtfilt(b, a, signal, axis=-1)
     #works
     return filtered_signal
-
-def downsampling(filtered_signal, sampling_rate):
-    downsample_factor = 2
-    downsampled_signal = filtered_signal[:, ::downsample_factor]
-    # works
-    new_sampling_rate = sampling_rate / downsample_factor
-
-    return downsampled_signal, new_sampling_rate
-
-def resample_to_seconds(timestamps, values, duration):
-    time_grid = np.arange(0, int(duration))
-    resampled = np.interp(time_grid, timestamps, values)
-    return time_grid, resampled
 
 def detect_qrs_complex(signal, sampling_rate):
     # biosppy ECG processing returns a dictionary
@@ -270,9 +257,7 @@ if __name__ == '__main__':
     from multiprocessing import freeze_support
     freeze_support()  # optional but recommended on Windows
 
-    # Root directory containing WFDB records
     data_root_dir = "C:/Users/ZelenePC/Desktop/sleep_apnea_detection/apnea-ecg-database-1.0.0"
-    #data_root_dir = "C:/Users/julia/Documents/GitHub/sleep_apnea_detection/apnea-ecg-database-1.0.0/TESTING"
 
     # Run processing
     process_all_ecg_files(data_root_dir)

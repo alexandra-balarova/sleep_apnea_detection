@@ -1,3 +1,15 @@
+packages <- c(
+  "data.table",
+  "plotly",
+  "caret",
+  "ranger",
+  "corrplot",
+  "pROC"
+)
+
+install.packages(packages)
+
+
 library(data.table)
 library(plotly)
 library(caret)
@@ -11,7 +23,6 @@ colSums(is.na(dt))
 unique(dt[, patient]) 
 dt <- dt[!is.na(label)] 
 unique(dt[, patient])
-
 
 #some lag features of the features with the most contributions
 dt[, `:=`(
@@ -90,10 +101,9 @@ train_y <- factor(training$label)
 test_x <- as.data.frame(test[, ..feature_cols])
 test_y <- factor(test$label)
 
-
+'''
 ## Parameter testing ----
 
-'''
 hyper_grid <- expand.grid(
   ntrees = c(100, 200, 300, 400, 500),
   mtry = c(2,4,6,8,10,12),
@@ -145,7 +155,7 @@ for(i in 1:nrow(hyper_grid)){
     
     preds <- factor(ifelse(probs >= 0.4, "1", "0"),levels = c("0", "1"))
     
-    roc_obj <- roc( fold_val_y,probs,levels = c("0", "1"),  quiet = TRUE)
+    roc_obj <- roc(fold_val_y,probs,levels = c("0", "1"),  quiet = TRUE)
     
     cf <- confusionMatrix(preds,fold_val_y,positive = "1")
     
@@ -234,7 +244,6 @@ cm <- confusionMatrix(pred_labels,test_y,mode = "prec_recall",positive = "1")
 print(cm)
 
 '''
-
 # actual model
 
 rf_model <- ranger(

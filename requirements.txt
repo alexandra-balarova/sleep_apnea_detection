@@ -1,1 +1,5 @@
- pip install wfdb pandas
+numpy
+scipy
+wfdb
+biosppy
+pandas
