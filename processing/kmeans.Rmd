@@ -1,0 +1,359 @@
+---
+title: "KMeans"
+output: html_document
+date: "2026-05-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r}
+library(plotly)
+library(cluster)
+library(factoextra)
+library(corrplot)
+library(ggplot2)
+library(GGally)
+library(imager)
+library(animation)
+library(data.table)
+library(caret)
+```
+
+# Load Data
+
+```{r}
+dt <- fread("ecg_data.csv")
+
+# Remove observations without labels
+dt <- dt[!is.na(label)]
+```
+
+# Feature Engineering
+
+The original HRV features were extended with lag, rolling statistics and delta features to capture temporal information.
+
+```{r}
+dt[, `:=`(
+  lag1_feat1 = shift(vlf, 1),
+  lag2_feat1 = shift(vlf, 2),
+
+  roll3_mean = frollmean(vlf, 3, align = "right"),
+  roll3_sd   = frollapply(vlf, 3, sd, align = "right"),
+
+  roll5_mean = frollmean(vlf, 5, align = "right"),
+  roll5_sd   = frollapply(vlf, 5, sd, align = "right"),
+
+  delta1_feat1 = vlf - shift(vlf, 1),
+  delta5_feat1 = vlf - shift(vlf, 5),
+
+  lag1_feat2 = shift(rr_sd, 1),
+  lag2_feat2 = shift(rr_sd, 2),
+
+  roll3_mean_2 = frollmean(rr_sd, 3, align = "right"),
+  roll3_sd_2   = frollapply(rr_sd, 3, sd, align = "right"),
+
+  roll5_mean_2 = frollmean(rr_sd, 5, align = "right"),
+  roll5_sd_2   = frollapply(rr_sd, 5, sd, align = "right"),
+
+  delta1_feat2 = rr_sd - shift(rr_sd, 1),
+  delta5_feat2 = rr_sd - shift(rr_sd, 5),
+
+  lag1_feat3 = shift(bpm, 1),
+  lag2_feat3 = shift(bpm, 2),
+
+  roll3_mean_3 = frollmean(bpm, 3, align = "right"),
+  roll3_sd_3   = frollapply(bpm, 3, sd, align = "right"),
+
+  roll5_mean_3 = frollmean(bpm, 5, align = "right"),
+  roll5_sd_3   = frollapply(bpm, 5, sd, align = "right"),
+
+  delta1_feat3 = bpm - shift(bpm, 1),
+  delta5_feat3 = bpm - shift(bpm, 5),
+
+  lag1_feat4 = shift(hf, 1),
+  lag2_feat4 = shift(hf, 2),
+
+  roll3_mean_4 = frollmean(hf, 3, align = "right"),
+  roll3_sd_4   = frollapply(hf, 3, sd, align = "right"),
+
+  roll5_mean_4 = frollmean(hf, 5, align = "right"),
+  roll5_sd_4   = frollapply(hf, 5, sd, align = "right"),
+
+  delta1_feat4 = hf - shift(hf, 1),
+  delta5_feat4 = hf - shift(hf, 5)
+
+), by = patient]
+
+dt <- na.omit(dt)
+```
+
+# Train Test Split
+
+```{r}
+train_patients <- c(
+  "a01","a03","a04","a05","a06","a07","a08",
+  "a09","a10","a11","a12","a13","a14","a15",
+  "a16","b01","c03","c05","c06"
+)
+
+test_patients <- c(
+  "a17","a18","a19","a20","b03","c07","c08"
+)
+
+training <- dt[patient %in% train_patients]
+test <- dt[patient %in% test_patients]
+```
+
+# Feature Selection
+
+Use all engineered features except metadata.
+
+```{r}
+#feature_cols <- c( "rr_mean","rr_sd","rmssd","nn50", "pnn50","bpm","vlf","lf", "hf", "lf_hf","lf_norm","hf_norm")
+feature_cols <- setdiff(
+  names(training),
+  c("label", "patient", "title")
+)
+
+train_x <- as.data.frame(training[, ..feature_cols])
+train_y <- factor(training$label)
+
+test_x <- as.data.frame(test[, ..feature_cols])
+test_y <- factor(test$label)
+```
+
+# Feature Scaling
+
+K-Means is distance-based and therefore requires standardized features.
+
+```{r}
+train_scaled <- scale(train_x)
+
+center <- attr(train_scaled, "scaled:center")
+scale_ <- attr(train_scaled, "scaled:scale")
+
+train_x_scaled <- as.data.table(train_scaled)
+
+test_x_scaled <- as.data.table(
+  scale(test_x, center = center, scale = scale_)
+)
+```
+pca test
+```{r}
+#pca <- prcomp(train_x_scaled,center = TRUE,scale. = TRUE)
+
+#summary(pca)#summary(pca)$importance#train_pca <- pca$x[,1:15]
+
+#test_pca <- predict(pca,newdata = test_x_scaled)[,1:15]
+```
+
+# Finding the Best k
+
+The elbow method and silhouette score were used to evaluate different cluster numbers.
+
+```{r}
+set.seed(123)
+
+k_values <- 2:10
+
+results <- data.frame(
+  k = integer(),
+  WSS = numeric(),
+  Silhouette = numeric()
+)
+
+for(current_k in k_values){
+
+  km <- kmeans(
+    train_x_scaled,
+    centers = current_k,
+    nstart = 50,
+    iter.max = 100
+  )
+
+  sil <- silhouette(
+    km$cluster,
+    dist(train_x_scaled)
+  )
+
+  results <- rbind(
+    results,
+    data.frame(
+      k = current_k,
+      WSS = km$tot.withinss,
+      Silhouette = mean(sil[,3])
+    )
+  )
+}
+```
+
+```{r}
+print(results)
+```
+Plotting the results
+```{r}
+plot_ly(type = "scatter", mode = "lines") |>
+  add_lines(
+    x = results$k,
+    y = results$WSS,
+    name = "WSS"
+  ) |>
+  add_lines(
+    x = results$k,
+    y = results$Silhouette,
+    name = "Silhouette"
+  )
+```
+
+# Final Model
+
+Based on the previous experiments, the final model uses four clusters.
+
+```{r}
+set.seed(123)
+
+final_k <- 4
+
+kmeans_model <- kmeans(
+  train_x_scaled,
+  centers = final_k,
+  nstart = 50,
+  iter.max = 100
+)
+```
+
+# Assign Cluster Labels
+
+K-Means returns cluster IDs. Therefore, clusters are mapped to the majority class in the training data.
+
+```{r}
+cluster_label_map <- data.table(
+  cluster = kmeans_model$cluster,
+  label = train_y
+)
+
+cluster_counts <- cluster_label_map[
+  , .N,
+  by = .(cluster, label)
+]
+
+mapping <- cluster_counts[
+  order(cluster, -N)
+][
+  , .SD[1],
+  by = cluster
+]
+
+mapping
+```
+
+# Predict Training Data
+
+```{r}
+train_clusters <- kmeans_model$cluster
+
+train_pred <- sapply(
+  train_clusters,
+  function(x){
+    mapping[cluster == x, as.character(label)]
+  }
+)
+
+train_pred <- factor(
+  train_pred,
+  levels = c("0","1")
+)
+```
+
+# Predict Test Data
+
+```{r}
+centers <- kmeans_model$centers
+
+predict_kmeans <- function(newdata, centers){
+
+  distances <- sapply(
+    1:nrow(centers),
+    function(i){
+      rowSums(
+        (sweep(newdata, 2, centers[i,], "-"))^2
+      )
+    }
+  )
+
+  max.col(-distances)
+}
+
+test_clusters <- predict_kmeans(
+  as.matrix(test_x_scaled),
+  centers
+)
+
+test_pred <- sapply(
+  test_clusters,
+  function(x){
+    mapping[cluster == x, as.character(label)]
+  }
+)
+
+test_pred <- factor(
+  test_pred,
+  levels = c("0","1")
+)
+```
+
+# Evaluation
+
+## Test Set
+
+```{r}
+kmeans_confusion_matrix <- confusionMatrix(
+  test_pred,
+  test_y,
+  positive = "1",
+  mode = "prec_recall"
+)
+
+print(kmeans_confusion_matrix)
+```
+
+## Training Set
+
+```{r}
+kmeans_confusion_matrix_train <- confusionMatrix(
+  train_pred,
+  train_y,
+  positive = "1",
+  mode = "prec_recall"
+)
+
+print(kmeans_confusion_matrix_train)
+```
+
+# Extract Metrics
+
+```{r}
+data.frame(
+  Accuracy = kmeans_confusion_matrix$overall["Accuracy"],
+  Recall = kmeans_confusion_matrix$byClass["Recall"],
+  Precision = kmeans_confusion_matrix$byClass["Precision"],
+  F1 = kmeans_confusion_matrix$byClass["F1"]
+)
+```
+
+
+```{r}
+## Per Patient Accuracy
+
+patient_perf <- test_results[, .(
+  Accuracy = mean(pred == as.character(label)),
+  N = .N,
+  Apnea_Rate = mean(label == "1")
+), by = patient]
+
+print(patient_perf)
+```
