@@ -1,0 +1,480 @@
+---
+title: "knn"
+output: html_document
+date: "2026-05-30"
+---
+
+
+# loading the libraries
+```{r , include=FALSE}
+library(data.table) # Data wrangling (Py_equivalent: pandas, polars, pydatatable)
+library(plotly) # Beautiful plots
+library(rpart) # Decision trees
+library(rpart.plot)
+library(caret)
+library(class)
+library(kknn)
+library(pROC)
+```
+# Reading in the file
+
+```{r , include=FALSE}
+dt <- fread("ecg_data.csv")
+```
+
+# looking at the data
+```{r , include=FALSE}
+#checking how many patients we have
+unique(dt[, patient]) 
+length(unique(dt[, patient]))
+
+#removing any patients that don't have a label 
+dt <- dt[!is.na(label)] 
+#checking again
+unique(dt[, patient])
+length(unique(dt[, patient]))
+```
+
+```{r}
+#checking if there are any missing values -> no
+colSums(is.na(dt))
+```
+
+
+
+#Spiting into test and training set
+```{r , include=FALSE}
+# some lag features of the features with the most contributions
+dt[, `:=`(
+  lag1_feat1 = shift(vlf, 1),
+  lag2_feat1 = shift(vlf, 2),
+  
+  roll3_mean = frollmean(vlf, 3, align = "right"),
+  roll3_sd   = frollapply(vlf, 3, sd, align = "right"),
+  
+  roll5_mean = frollmean(vlf, 5, align = "right"),
+  roll5_sd   = frollapply(vlf, 5, sd, align = "right"),
+  
+  delta1_feat1 = vlf - shift(vlf, 1),
+  delta5_feat1 = vlf - shift(vlf, 5),
+  
+  lag1_feat2 = shift(rr_sd, 1),
+  lag2_feat2 = shift(rr_sd, 2),
+  
+  roll3_mean_2 = frollmean(rr_sd, 3, align = "right"),
+  roll3_sd_2   = frollapply(rr_sd, 3, sd, align = "right"),
+  
+  roll5_mean_2 = frollmean(rr_sd, 5, align = "right"),
+  roll5_sd_2   = frollapply(rr_sd, 5, sd, align = "right"),
+  
+  delta1_feat2 = rr_sd - shift(rr_sd, 1),
+  delta5_feat2 = rr_sd - shift(rr_sd, 5),
+  
+  lag1_feat3 = shift(bpm, 1),
+  lag2_feat3 = shift(bpm, 2),
+  
+  roll3_mean_3 = frollmean(bpm, 3, align = "right"),
+  roll3_sd_3   = frollapply(bpm, 3, sd, align = "right"),
+  
+  
+  roll5_mean_3 = frollmean(bpm, 5, align = "right"),
+  roll5_sd_3   = frollapply(bpm, 5, sd, align = "right"),
+  
+  delta1_feat3 = bpm - shift(bpm, 1),
+  delta5_feat3 = bpm - shift(bpm, 5),
+  
+  lag1_feat4 = shift(hf, 1),
+  lag2_feat4 = shift(hf, 2),
+  
+  roll3_mean_4 = frollmean(hf, 3, align = "right"),
+  roll3_sd_4   = frollapply(hf, 3, sd, align = "right"),
+  
+  roll5_mean_4 = frollmean(hf, 5, align = "right"),
+  roll5_sd_4   = frollapply(hf, 5, sd, align = "right"),
+  
+  delta1_feat4 = hf - shift(hf, 1),
+  delta5_feat4 = hf - shift(hf, 5)
+  
+), by = patient]
+dt <- na.omit(dt)
+
+train_patients <- c("a01", "a03", "a04", "a05", "a06", "a07", "a08", "a09", "a10", "a11", 
+                    "a12", "a13", "a14", "a15", "a16", "b01", "c03", "c05", "c06")
+
+test_patients <- c( "a17", "a18", "a19", "a20", "b03", "c07", "c08")
+
+training <- dt[patient %in% train_patients]
+test <- dt[patient %in% test_patients]
+
+print(training[, .N, by = label])
+print(test[, .N, by = label])
+
+feature_sets <- list(
+
+  Main12 = c(
+    "rr_mean","rr_sd","rmssd","nn50","pnn50","bpm","vlf","lf","hf","lf_hf","lf_norm","hf_norm"
+  ),
+
+  Top15 = c(
+    "roll3_mean", "roll5_mean", "lag1_feat1",
+    "vlf","lag2_feat1", "roll5_sd_3",
+    "roll5_mean_4","lag1_feat2",
+    "roll3_mean_4", "roll3_mean_2",
+    "roll5_mean_3", "rr_sd",
+    "roll3_sd_3", "lag1_feat3",
+    "roll5_sd_2"
+  ),
+
+  All = setdiff(
+    names(training),
+    c("label","patient","title")
+  )
+)
+
+#main 12 features
+#feature_cols <- c( "rr_mean","rr_sd","rmssd","nn50", "pnn50","bpm","vlf","lf", "hf", "lf_hf","lf_norm","hf_norm")
+
+#top 15 featues based of the rf 
+#feature_cols <- c(selected_features <- c("roll3_mean", "roll5_mean", "lag1_feat1", "vlf","lag2_feat1", "roll5_sd_3", "roll5_mean_4","lag1_feat2",  "roll3_mean_4", "roll3_mean_2", "roll5_mean_3", "rr_sd","roll3_sd_3", "lag1_feat3", "roll5_sd_2") )
+
+#all features
+feature_cols <- setdiff(  names(training),  c("label", "patient", "title"))
+
+
+train_x <- as.data.frame(training[, ..feature_cols])
+train_y <- factor(training$label)
+
+test_x <- as.data.frame(test[, ..feature_cols])
+test_y <- factor(test$label)
+
+```
+
+
+## scaling the data 
+```{r , include=FALSE}
+train_scaled <- scale(train_x)
+
+center <- attr(train_scaled, "scaled:center")
+scale_ <- attr(train_scaled, "scaled:scale")
+
+train_x_scaled <- as.data.table(train_scaled)
+
+test_x_scaled <- as.data.table(
+  scale(test_x, center = center, scale = scale_)
+)
+```
+
+pca
+```{r}
+use_pca <- FALSE
+pca_variance <- 0.90
+
+if(use_pca){
+
+  pca_model <- prcomp(train_x_scaled)
+
+  explained_var <- cumsum(
+    pca_model$sdev^2 /
+    sum(pca_model$sdev^2)
+  )
+
+  n_comp <- which(
+    explained_var >= pca_variance
+  )[1]
+
+  train_x_scaled <- as.data.table(
+    predict(
+      pca_model,
+      train_x_scaled
+    )[,1:n_comp]
+  )
+
+  test_x_scaled <- as.data.table(
+    predict(
+      pca_model,
+      test_x_scaled
+    )[,1:n_comp]
+  )
+}
+
+```
+
+
+Choose K-Values
+```{r}
+k <- seq(15, 35, 2)
+print(levels(train_y))
+print(levels(test_y))
+```
+<!--
+
+-->
+
+## LOPO-CV
+```{r}
+patients <- unique(training$patient)
+
+results <- data.frame()
+
+for(current_k in k){
+
+  all_pred <- c()
+  all_true <- c()
+
+  for(p in patients){
+
+    train_fold <- training[patient != p]
+    test_fold  <- training[patient == p]
+  
+
+    train_x_fold <- as.matrix(
+      train_fold[, ..feature_cols]
+    )
+
+    test_x_fold <- as.matrix(
+      test_fold[, ..feature_cols]
+    )
+
+    train_y_fold <- factor(train_fold$label)
+    test_y_fold <- factor(test_fold$label)
+
+    train_x_fold <- scale(train_x_fold)
+
+    center <- attr(train_x_fold, "scaled:center")
+    scale_ <- attr(train_x_fold, "scaled:scale")
+
+    test_x_fold <- scale(test_x_fold,center = center,scale = scale_)
+    
+    ##### pca
+    if(use_pca){
+
+      pca_model <- prcomp(train_x_fold)
+    
+      explained_var <- cumsum(
+        pca_model$sdev^2 /
+        sum(pca_model$sdev^2)
+      )
+    
+      n_comp <- which(
+        explained_var >= pca_variance
+      )[1]
+    
+      train_x_fold <- predict(
+        pca_model,
+        train_x_fold
+      )[,1:n_comp]
+    
+      test_x_fold <- predict(
+        pca_model,
+        test_x_fold
+      )[,1:n_comp]
+    
+    }
+    
+    #####
+
+    ## using th ekknn library instead
+    train_df <- data.frame(train_x_fold,label = train_y_fold)
+  
+    test_df <- data.frame(test_x_fold)
+    
+    used_distance = 1
+    
+    fit <- kknn(label ~ .,train = train_df,test = test_df,k = current_k, distance = used_distance, kernel = "optimal" )
+    
+    probs <- fit$prob[,2]
+    
+    threshold <- 0.4
+    
+    test_pred <- factor(
+      ifelse(probs >= threshold, "1", "0"),
+      levels = c("0","1")
+    )
+      ##
+
+    all_pred <- c(all_pred, as.character(test_pred))
+    all_true <- c(all_true, as.character(test_y_fold))
+  }
+
+  cm <- confusionMatrix(
+    factor(all_pred, levels = c("0","1")),
+    factor(all_true, levels = c("0","1")),
+    positive = "1",
+    mode = "prec_recall"
+  )
+
+  results <- rbind(
+    results,
+    data.frame(
+      k = current_k,
+      Accuracy = cm$overall["Accuracy"],
+      Recall = cm$byClass["Recall"],
+      Precision = cm$byClass["Precision"],
+      F1 = cm$byClass["F1"]
+    )
+  )
+}
+
+
+```
+
+plotting the results to get the best k 
+```{r}
+plot_ly(type = "scatter", mode = "lines") |>
+  add_lines(x = results$k,
+            y = results$Accuracy,
+            name = "Accuracy") |>
+  add_lines(x = results$k,
+            y = results$Recall,
+            name = "Recall") |>
+  add_lines(x = results$k,
+            y = results$Precision,
+            name = "Precision") |>
+  add_lines(x = results$k,
+            y = results$F1,
+            name = "F1")
+```
+
+ getting the best k based on the highest precision
+```{r}
+print("the best k for the highest recall is at: ")
+
+best_k <- results$k[which.max(results$Recall)]
+print(best_k)
+```
+
+# Train final model on training data and predict test data
+```{r , include=FALSE}
+train_df <- data.frame(
+  train_x_scaled,
+  label = train_y
+)
+
+test_df <- data.frame(
+  test_x_scaled
+)
+
+fit_test <- kknn(
+  label ~ .,
+  train = train_df,
+  test = test_df,
+  k = best_k,
+  distance = used_distance,
+  kernel = "optimal"
+)
+
+probs <- fit_test$prob[,2]
+
+
+test_pred <- factor(
+  ifelse(probs >= threshold, "1", "0"),
+  levels = c("0","1")
+)
+
+fit_train <- kknn(
+  label ~ .,
+  train = train_df,
+  test = train_df,
+  k = best_k,
+  distance = used_distance,
+  kernel = "optimal"
+)
+
+train_pred <- fitted(fit_train)
+```
+
+## Evaluation
+###  Evaluate on test set
+```{r}
+knn_confusion_matrix <-confusionMatrix(test_pred, test_y, positive="1", mode = "prec_recall")
+print(knn_confusion_matrix)
+```
+
+###  Evaluate on training set
+```{r , include=FALSE}
+knn_confusion_matrix_train <-confusionMatrix(train_pred, train_y, positive = "1",mode = "prec_recall")
+print(knn_confusion_matrix_train)
+```
+
+Roc Curve
+```{r}
+roc_obj <- roc(
+  response = test_y,
+  predictor = probs
+)
+auc(roc_obj)
+```
+
+```{r}
+plot(
+  roc_obj,
+  main = "ROC Curve - kNN"
+)
+
+abline(
+  a = 0,
+  b = 1,
+  lty = 2
+)
+```
+
+
+```{r}
+summary_row <- data.frame(
+
+  Feature_Set = "AllFeatures",
+
+  PCA = use_pca,
+
+  Distance = used_distance,
+
+  Threshold = threshold,
+
+  K = best_k,
+
+  Train_Accuracy =
+    knn_confusion_matrix_train$overall["Accuracy"],
+
+  Train_Recall =
+    knn_confusion_matrix_train$byClass["Recall"],
+
+  Train_Precision =
+    knn_confusion_matrix_train$byClass["Precision"],
+
+  Train_F1 =
+    knn_confusion_matrix_train$byClass["F1"],
+
+  Test_Accuracy =
+    knn_confusion_matrix$overall["Accuracy"],
+
+  Test_Recall =
+    knn_confusion_matrix$byClass["Recall"],
+
+  Test_Precision =
+    knn_confusion_matrix$byClass["Precision"],
+
+  Test_F1 =
+    knn_confusion_matrix$byClass["F1"],
+
+  AUC = as.numeric(auc(roc_obj))
+)
+
+summary_row
+```
+
+
+```{r}
+## Per Patient Performance
+
+test_results <- copy(test)
+
+test_results$pred <- as.character(test_pred)
+
+patient_perf <- test_results[, .(
+  Accuracy = mean(pred == as.character(label)),
+  N = .N,
+  Apnea_Rate = mean(label == "1")
+), by = patient]
+
+print(patient_perf)
+```
